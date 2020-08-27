@@ -1,7 +1,69 @@
 pico-8 cartridge // http://www.pico-8.com
 version 27
 __lua__
+
 debug=true
+
+cutscene={}
+cutscene.scene={}
+cutscene.step=1
+cutscene.timer=0
+cutscene.wait=function(t)
+cutscene.timer+=1
+if cutscene.timer>t
+	then cutscene.advance()
+	end
+end
+cutscene.advance=function()
+	if #cutscene.scene>0 then
+		cutscene.step+=1
+		cutscene.timer=0
+	end
+end
+cutscene.update=function()
+	if #cutscene.scene>0 then
+		if cutscene.step>#cutscene.scene then
+			--reset
+			cutscene.scene={}
+			cutscene.step=1
+			cutscene.timer=0
+		else
+			--run next part of scene
+			local f=cutscene.scene[cutscene.step][1]
+			local p1=cutscene.scene[cutscene.step][2]
+			local p2=cutscene.scene[cutscene.step][3]
+			local p3=cutscene.scene[cutscene.step][4]
+			f(p1,p2,p3)
+		end
+	end
+end
+
+curtain = {}
+curtain.state = 'up'
+curtain.height = 0
+curtain.speed = 4
+curtain.set = function(s)
+ curtain.state = s
+ cutscene.advance()
+end
+curtain.draw = function()
+  -- top
+  rectfill(0,-1,128,curtain.height-1,0)
+  --bottom
+  rectfill(0,129,128,129-curtain.height,0)
+end
+curtain.update = function()
+ if curtain.state == 'up' then
+   if curtain.height > 0 then
+     curtain.height -= curtain.speed
+   end
+ end
+ if curtain.state == 'down' then
+   if curtain.height <= 64 then
+     curtain.height += curtain.speed
+   end
+ end
+end
 
 outside={}
 outside.x=0
@@ -18,8 +80,40 @@ shop.h=10
 shop.bg=0
 
 currentroom=outside
+function setcurrentroom(room)
+	currentroom=room
+	cutscene.advance()
+end
 
+function moveroom(room,entity,x,y)
+	cutscene.scene={
+	{curtain.set,'down'},
+	{cutscene.wait,20},
+	{setcurrentroom,room},
+	{entity.position.setposition,x,y},
+	{curtain.set,'up'},
+	{cutscene.wait,20}
+}
+end
+
+--entity table
 entities={}
+
+function newheart(x,y)
+	--heart
+	return
+		newentity({
+		//position
+		position=newposition(x,y,8,8),
+		//sprite
+		--sprite=newsprite({{64,16}},1),
+		sprite=newsprite({idle={images={{64,16}},flip=false}}),
+		//bounds
+		bounds=newbounds(1,1,6,6),
+		item=true
+		})
+	end
+
 
 function printoutline(t,x,y,c)
 --draw outline
@@ -61,6 +155,17 @@ return not fget(mget
 
 end
 
+function newinventory(s,v,x,y,items)
+	local i={}
+	i.size=s
+	i.visible=v
+	i.x=x
+	i.y=y
+	i.items=items
+	i.selected=1
+	return i
+end
+
 
 function touching(x1,y1,w1,h1,
 																		x2,y2,w2,h2)
@@ -94,11 +199,13 @@ function newdialogue()
 		d.text[1]=sub(text,splitpos,#text)
 	else
 		d.text[0]=text
+		d.text[1]=nil
 	end
 		d.timed=timed
 		d.cursor=0
 		if timed then d.timeremaining=50
 		 end
+			cutscene.advance()
 	 end
 	return d
 end
@@ -130,23 +237,27 @@ end
 
 //control component
 function newcontrol(left,right,
-																				up,down,input)
+																				up,down,z,x,input)
 	local c={}
 	c.left=left
 	c.right=right
 	c.up=up
 	c.down=down
+	c.z=z
+	c.x=x
 	c.input=input
 	return c
 end
 
-//intentionb component
+//intention component
 function newintention()
 local i={}
 i.left=false
 i.right=false
 i.up=false
 i.down=false
+i.z=false
+i.x=false
 i.moving=false
 return i
 end
@@ -158,24 +269,37 @@ function newposition(x,y,w,h)
 	p.y=y
 	p.w=w
 	p.h=h
+	p.setposition=function(x,y)
+		p.x=x
+		p.y=y
+		cutscene.advance()
+	end
 	return p
 end
 
+function newstate(initialstate,r)
+local s={}
+s.current=initialstate
+s.previous=initialstate
+s.rules=r
+return s
+end
+
 //sprite component
-function newsprite(sl,i)
+function newsprite(sl)
 	local s={}
 	s.spritelist=sl
-	s.index=i
-	s.flip=false
+	s.index=1
+	--s.flip=false
 	return s
 end
 
 //animation component
-function newanimation(d,t)
+function newanimation(l)
  local a = {}
  a.timer = 0
- a.delay = d
- a.type  = t
+ a.delay = 3
+ a.list  = l
  return a
 end
 
@@ -190,28 +314,52 @@ function newentity(componenttable)
  e.animation=componenttable.animation or nil
  e.trigger=componenttable.trigger or nil
  e.dialogue=componenttable.dialogue or nil
+	e.state=componenttable.state or {current='idle'}
+	e.inventory=componenttable.inventory or nil
+	e.item=componenttable.item or false
+	e.gamestate='playing'
  return e
 end
 
 function playerinput(ent)
-			ent.intention.left=
-			btn(ent.control.left)
-			ent.intention.right=
-			btn(ent.control.right)
-			ent.intention.up=
-			btn(ent.control.up)
-			ent.intention.down=
-			btn(ent.control.down)
 
-			ent.intention.moving=ent.intention.left or
-																								ent.intention.right or
-																								ent.intention.up or
-																								ent.intention.down
+  if #cutscene.scene > 0 then
+    ent.intention.left = false
+    ent.intention.right = false
+    ent.intention.up = false
+    ent.intention.down = false
+    ent.intention.o = false
+    ent.intention.x = false
+  else
+    if ent.gamestate then
+     if ent.gamestate == 'playing' then
+      ent.intention.left = btn(ent.control.left)
+      ent.intention.right = btn(ent.control.right)
+      ent.intention.up = btn(ent.control.up)
+      ent.intention.down = btn(ent.control.down)
+      ent.intention.z = btnp(ent.control.z)
+      ent.intention.x = btnp(ent.control.x)
+						ent.intention.moving=ent.intention.left or
+																											ent.intention.right or
+																											ent.intention.up or
+																											ent.intention.down
+     elseif ent.gamestate == 'inventory' then
+      ent.intention.left = btnp(ent.control.left)
+      ent.intention.right = btnp(ent.control.right)
+      ent.intention.up = btnp(ent.control.up)
+      ent.intention.down = btnp(ent.control.down)
+      ent.intention.z = btnp(ent.control.z)
+      ent.intention.x = btnp(ent.control.x)
+     end
+    end
+  end
 end
 
-//function npcinput(ent)
-//	ent.intention.left=true
-//end
+--ent.intention.moving=ent.intention.left or
+																					--ent.intention.right or
+																					--ent.intention.up or
+																					--ent.intention.down
+
 
 controlsystem={}
 controlsystem.update=function()
@@ -226,6 +374,7 @@ end
 physicssystem={}
 physicssystem.update=function()
 	for ent in all(entities) do
+		if ent.gamestate and ent.gamestate=='playing' then
 			if ent.position and ent.bounds then
 
 		local newx=ent.position.x
@@ -319,6 +468,7 @@ physicssystem.update=function()
 	then ent.position.y=newy
 	end
 
+			end
 		end
 	end
 end
@@ -326,26 +476,25 @@ end
 animationsystem = {}
 animationsystem.update = function()
  for ent in all(entities) do
-  if ent.sprite and ent.animation then
-   if ent.animation.type=='idle'or (ent.intention and ent.animation.type=='walk' and ent.intention.moving) then
-   -- increment the animation timer
-	   ent.animation.timer += 1
-	   -- if the timer is higher than the delay
-	   if ent.animation.timer > ent.animation.delay then
-	    -- increment then index ans reset the timer
-	    ent.sprite.index += 1
-	    if ent.sprite.index > #ent.sprite.spritelist then
-	      ent.sprite.index = 2
-	    end
-	    ent.animation.timer = 0
-	   end
-	  else
-	  ent.sprite.index=1
+		if ent.gamestate and ent.gamestate=='playing' then
+			if ent.sprite and ent.animation and ent.state then
 
-  	end
-
+				if ent.animation.list[ent.state.current] then
+					--increment timer
+					ent.animation.timer+=1
+					--if timer > than delay
+						if ent.animation.timer>ent.animation.delay then
+							ent.sprite.index+=1
+								if ent.sprite.index > #ent.sprite.spritelist[ent.state.current]['images'] then
+									ent.sprite.index=1
+								end
+								ent.animation.timer=0
+						end
+					end
+				end
   end
  end
+
 end
 
 triggersystem={}
@@ -418,6 +567,95 @@ dialoguesystem.update=function()
 	end
 end
 
+statesystem={}
+statesystem.update=function()
+	for ent in all(entities) do
+		if ent.gamestate and ent.gamestate=='playing' then
+			if ent.state and ent.state.rules then
+
+				ent.state.previous=ent.state.current
+
+				for s,r in pairs(ent.state.rules) do
+					if r() then
+						ent.state.current=s
+					end
+				end
+			end
+		end
+	end
+end
+
+itemsystem={}
+itemsystem.update=function()
+	for ent in all(entities) do
+		if ent.item then
+			for o in all(entities) do
+				if o~=ent and o.position and o.bounds and ent.position then
+					if touching(ent.position.x,
+																	ent.position.y,
+																 ent.position.w,
+																 ent.position.h,
+																 o.position.x+o.bounds.xoff,
+																 o.position.y+o.bounds.yoff,
+																 o.bounds.w,
+																 o.bounds.h) then
+						if o.inventory and #o.inventory.items<o.inventory.size and o.intention and o.intention.x then
+							add(o.inventory.items,ent)
+							del(entities,ent)
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+
+gamestatesystem = {}
+gamestatesystem.update = function()
+ for ent in all(entities) do
+  if ent.gamestate and ent.intention then
+   if ent.intention.z then
+    if ent.gamestate == 'playing' then
+     ent.gamestate = 'inventory'
+    else
+     if ent.gamestate == 'inventory' then
+      ent.gamestate = 'playing'
+     end
+    end
+   end
+  end
+ end
+end
+
+inventorysystem = {}
+inventorysystem.update = function()
+ for ent in all(entities) do
+  if ent.inventory and ent.inventory.visible then
+   if ent.gamestate and ent.gamestate == 'inventory' then
+    if ent.intention.left then
+     ent.inventory.selected = max(1,ent.inventory.selected-1)
+    elseif ent.intention.right then
+     ent.inventory.selected = min(ent.inventory.selected+1,ent.inventory.size)
+    elseif ent.intention.down then
+     -- drop item
+     -- if item exists at selected position
+     if ent.inventory.items[ent.inventory.selected] then
+      local i = ent.inventory.items[ent.inventory.selected]
+      if i.position then
+       -- update position
+       i.position.x = ent.position.x
+       i.position.y = ent.position.y
+       add(entities,i)
+       del(ent.inventory.items,i)
+      end
+     end
+    end
+   end
+  end
+ end
+end
+
 gs={}
 gs.update=function()
 	cls()
@@ -439,24 +677,20 @@ gs.update=function()
 	--draw all entities with sprite
 		for ent in all(entities) do
 
-		--flip sprites?
-		if ent.sprite and ent.intention then
-			if ent.sprite.flip==false and ent.intention.left
-			then ent.sprite.flip=true
-			end
-			if ent.sprite.flip and ent.intention.right
-			then ent.sprite.flip=false
-			end
-		end
+		--draw entity
+			if ent.sprite and ent.position and ent.state then
 
-			if ent.sprite~=nil and
-			ent.position ~=nil then
-		sspr(ent.sprite.spritelist[ent.sprite.index][1],
-		ent.sprite.spritelist[ent.sprite.index][2],
-		ent.position.w,ent.position.h,
-		ent.position.x,ent.position.y,
-		ent.position.w,ent.position.h,
-		ent.sprite.flip,false)
+	 --reset sprite index if state changes
+				if ent.state.current != ent.state.previous then
+					ent.sprite.index=1
+				end
+
+					sspr(ent.sprite.spritelist[ent.state.current]['images'][ent.sprite.index][1],
+										ent.sprite.spritelist[ent.state.current]['images'][ent.sprite.index][2],
+										ent.position.w,ent.position.h,
+										ent.position.x,ent.position.y,
+										ent.position.w,ent.position.h,
+									 ent.sprite.spritelist[ent.state.current]['flip'],false)
 
 		end
 
@@ -529,6 +763,40 @@ end
 				end
 			end
 
+			camera()
+
+--draw inventory
+			for ent in all(entities) do
+	if ent.inventory and ent.inventory.visible then
+		rectfill(ent.inventory.x,ent.inventory.y,4+ent.inventory.x+(ent.inventory.size*11),ent.inventory.y+15,0)
+		rect(ent.inventory.x,ent.inventory.y,4+ent.inventory.x+(ent.inventory.size*11),ent.inventory.y+15,7)
+		for i=1,ent.inventory.size do
+			-- draw inventory slot
+			--rectfill(ent.inventory.x+2+(11*(i-1)),ent.inventory.y+2,9+ent.inventory.x+4+(11*(i-1)),ent.inventory.y+13,0)
+			--rect(ent.inventory.x+2+(11*(i-1)),ent.inventory.y+2,9+ent.inventory.x+4+(11*(i-1)),ent.inventory.y+13,7)
+			-- draw item if one exists
+			if ent.inventory.items[i] then
+				local e = ent.inventory.items[i]
+				sspr(e.sprite.spritelist[e.state.current]['images'][e.sprite.index][1],
+									e.sprite.spritelist[e.state.current]['images'][e.sprite.index][2],
+									e.position.w, e.position.h,
+									ent.inventory.x+4+(11*(i-1)), ent.inventory.y+4,
+									e.position.w, e.position.h,
+									e.sprite.spritelist[e.state.current]['flip'],false)
+			end
+		end
+		if ent.gamestate and ent.gamestate=='inventory' then
+			rect(ent.inventory.x+2+(ent.inventory.selected-1)*11,
+								ent.inventory.y+2,
+								13+ent.inventory.x+(ent.inventory.selected-1)*11,
+								ent.inventory.y+13,10)
+		end
+	end
+end
+
+
+		  curtain.draw()
+
 end
 
 
@@ -536,20 +804,42 @@ end
 function _init()
 	--creates new player
 	player=newentity({
-	//position
+	--position
 	position=newposition(64,64,8,8),
-	//sprite
-	sprite=newsprite({{8,0},{16,0},{24,0},{32,0},{40,0},{16,8},{24,8},{32,8},{40,8}},1),
-	//control
-	control=newcontrol(0,1,2,3,playerinput),
-	//intention
+	--sprite
+	--sprite=newsprite({{8,0},{16,0},{24,0},{32,0},{40,0},{16,8},{24,8},{32,8},{40,8}},1),
+ sprite=newsprite({idle={images={{16,0},{24,0},{32,0},{40,0},{16,8},{24,8},{32,8},{40,8}},flip=false},
+																			moveright={images={{16,0}},flip=false},
+																			moveleft={images={{16,8}},flip=false},
+																			moveup={images={{32,8}},flip=false},
+																			movedown={images={{32,0}},flip=false},
+																			upleft={images={{24,8}},flip=false},
+																			upright={images={{40,8}},flip=false},
+																			downleft={images={{40,0}},flip=false},
+																			downright={images={{24,0}},flip=false}
+}),
+	--control
+	control=newcontrol(0,1,2,3,4,5,playerinput),
+	--intention
 	intention=newintention(),
-	//bounds
+	--bounds
 	bounds=newbounds(1,4,6,4),
-	//animation
-	animation=newanimation(3,'walk'),
-	//dialogue
-	dialogue=newdialogue()
+	--animation
+	animation=newanimation({idle=true,moveright=true,moveleft=true,moveup=true,movedown=true}),
+	--dialogue
+	dialogue=newdialogue(),
+	--state
+	state=newstate('idle',{moveright=function() return player.intention.right end,
+																								moveleft=function() return player.intention.left end,
+																								moveup=function() return player.intention.up end,
+																								movedown=function() return player.intention.down end,
+																								upleft=function() return player.intention.up and player.intention.left end,
+																								upright=function() return player.intention.up and player.intention.right end,
+																								downleft=function() return player.intention.down and player.intention.left end,
+																								downright=function() return player.intention.down and player.intention.right end,
+																							 idle=function() return not player.intention.moving end}),
+		--inventory
+		inventory=newinventory(3,true,0,0,{})
 	})
 	add(entities,player)
 
@@ -559,14 +849,26 @@ function _init()
 		//position
 		position=newposition(24,80,16,16),
 		//sprite
-		sprite=newsprite({{64,0}},1),
+		--sprite=newsprite({{64,0}},1),
+		sprite=newsprite({idle={images={{64,0}},flip=false}}),
 		//bounds
 		bounds=newbounds(6,8,4,4),
 		//trigger
 		trigger=newtrigger(0,0,16,16,
 		function(self,other)
 			if other==player then
-				other.dialogue.set('hello tree. how are you today?',true)
+				--cutscene
+				cutscene.scene={
+
+					{other.dialogue.set,'hello tree. how are you today?',true},
+					{cutscene.wait,60},
+					{other.dialogue.set,'not responding?',true},
+					{cutscene.wait,50},
+					{other.dialogue.set,'i guess i will leaf you alone',true},
+					{cutscene.wait,50}
+
+
+				}
 			end
 		end,'wait')
 	})
@@ -576,17 +878,19 @@ function _init()
 			add(entities,
 		newentity({
 		position=newposition(80,60,32,32),
-		sprite=newsprite({{0,32}},1),
+		--sprite=newsprite({{0,32}},1),
+		sprite=newsprite({idle={images={{0,32}},flip=false}}),
 		bounds=newbounds(2,16,28,14),
 		trigger=newtrigger(22,26,7,6,
 			function(self,other)
 				if other==player
 				then
-					currentroom=shop
-					player.position.x=308
-					player.position.y=60
+					--currentroom=shop
+				 --player.position.x=308
+					--player.position.y=60
+	moveroom(shop,other,308,60)
 				end
-			end,'always')
+			end,'wait')
 		})
 		)
 
@@ -598,25 +902,20 @@ function _init()
 			function(self,other)
 				if other==player
 				then
-					currentroom=outside
-					player.position.x=101
-					player.position.y=90
+					--currentroom=outside
+					--player.position.x=101
+					--player.position.y=90
+		moveroom(outside,other,101,90)
 				end
-			end,'always')
+			end,'wait')
 		})
 		)
 
 	--heart
-		add(entities,
-		newentity({
-		//position
-		position=newposition(270,8,8,8),
-		//sprite
-		sprite=newsprite({{64,16}},1),
-		//bounds
-		bounds=newbounds(1,1,6,6)
-		})
-		)
+add(entities,newheart(270,8))
+add(entities,newheart(100,30))
+add(entities,newheart(70,40))
+add(entities,newheart(30,30))
 
 		--sword
 		add(entities,
@@ -624,10 +923,13 @@ function _init()
 		//position
 		position=newposition(310,8,8,8),
 		//sprite
-		sprite=newsprite({{64,24}},1),
+		--sprite=newsprite({{64,24}},1),
+		sprite=newsprite({idle={images={{64,24}},flip=false}}),
 		//bounds
-		bounds=newbounds(1,1,6,6)
-		})
+		bounds=newbounds(1,1,6,6),
+		//item
+		item=true
+	})
 		)
 
 		--shopkeep
@@ -636,7 +938,8 @@ function _init()
 		//position
 		position=newposition(292,16,8,8),
 		//sprite
-		sprite=newsprite({{72,16}},1),
+		--sprite=newsprite({{72,16}},1),
+		sprite=newsprite({idle={images={{72,16}},flip=false}}),
 		//bounds
 		bounds=newbounds(1,1,6,6),
 		//dialogue
@@ -644,9 +947,13 @@ function _init()
 		//trigger
 		trigger=newtrigger(0,0,8,20,
 	function(self,other)
-	if other==player
-then self.dialogue.set('welcome to the shop',true)
-					other.dialogue.set('yo',true)
+	if other==player then
+		cutscene.scene={
+			{self.dialogue.set,'welcome to the shop.',true},
+			{cutscene.wait,33},
+			{self.dialogue.set,'what would you like?',true},
+			{cutscene.wait,33}
+		}
 end
 end,'wait')
 		})
@@ -661,18 +968,31 @@ controlsystem.update()
 physicssystem.update()
 --animates
 animationsystem.update()
+--check entity state
+statesystem.update()
 --check triggers
 triggersystem.update()
 --update new dialogue
 dialoguesystem.update()
-
+--update cutscene
+cutscene.update()
+--update curtain
+curtain.update()
+--item system
+itemsystem.update()
+--check gamestate
+gamestatesystem.update()
+--update inventory system
+inventorysystem.update()
 end
 
 function _draw()
 gs.update()
 //print(canwalk(player.position.x,
 //						player.position.y,0,0,2))
-
+if debug==true then
+print(player.gamestate,0,120,10)
+end
 end
 
 
